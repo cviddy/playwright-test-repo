@@ -2,6 +2,7 @@
 import { Reporter, TestCase, TestResult } from "@playwright/test/reporter";
 // import { FullConfig, FullResult, Reporter, Suite, TestCase, TestResult } from '@playwright/test/reporter';
 import {
+  Emitter,
   buildSelfDescribingEvent,
   gotEmitter,
   HttpMethod,
@@ -15,7 +16,7 @@ let t: any;
 
 const testResultsSchema = [];
 
-export async function sendResults() {
+async function sendResults() {
   const data = {
     scenario_name: "it loads the web nav",
     feature_name: "test_title_name",
@@ -35,9 +36,10 @@ export async function sendResults() {
     error_message: undefined,
     context: "testContext",
   };
+
   const e = gotEmitter(
     // switch out collector endpoint for legit one
-    "test-url-collector", // Collector endpoint
+    "test-collector", // Collector endpoint
     HttpProtocol.HTTPS, // Protocol
     443,
     HttpMethod.POST, // Method
@@ -55,7 +57,7 @@ export async function sendResults() {
     } // Retries
   );
 
-  const t = tracker(e, "playwright_snowplow", "playwright", false);
+  const t = tracker([e], "playwright_snowplow", "playwright", false);
   // console.log(schemaData);
 
   const finishedevent = t.track(
@@ -72,21 +74,16 @@ class SnowPlowReporter implements Reporter {
   runId: number;
   private reportPublish: Promise<void>[] = [];
 
-  async onEnd(result: FullResult) {
-    await Promise.all(this.reportPublish);
-    console.log(`Finished the run: ${result.status}`);
-  }
   // On test end doesn't appear to be async but on end is according to this thread: https://github.com/microsoft/playwright/issues/14452
   // we need to use promises in here in order to get all the test results.
-  async onTestEnd(test: TestCase, result: TestResult) {
-    const testReportData = new Promise<void>((resolve) => {
-      setTimeout(() => {
-        sendResults();
-        resolve();
-      }, 100);
-    });
-    this.reportPublish.push(testReportData);
+  async onTestEnd(test: TestCase, result: TestResult): void {
+    const reportData = await sendResults();
+    this.reportPublish.push(reportData);
     // testResultsSchema.push(schemaData);
+  }
+  async onEnd(result: FullResult): Promise<void> {
+    await Promise.all(this.reportPublish);
+    console.log(`Finished the run: ${result.status}`);
   }
 }
 export default SnowPlowReporter;
